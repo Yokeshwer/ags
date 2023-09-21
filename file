@@ -1,0 +1,82 @@
+# Define the AWS provider
+provider "aws" {
+  region = "us-east-1" # Change to your desired AWS region
+}
+
+# Create a security group for instances
+resource "aws_security_group" "web_sg" {
+  name        = "web-security-group"
+  description = "Allow HTTP and SSH traffic"
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # Allow HTTP traffic from anywhere (for simplicity)
+  }
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # Allow SSH traffic from anywhere (for simplicity)
+  }
+}
+
+# Create an Elastic Load Balancer (ELB)
+resource "aws_lb" "web_lb" {
+  name               = "web-lb"
+  internal           = false
+  load_balancer_type = "application"
+  subnets            = ["subnet-xxxxxxxxxxx", "subnet-yyyyyyyyyyy"] # Specify your subnets
+}
+
+# Create an Auto Scaling Group (ASG)
+resource "aws_autoscaling_group" "web_asg" {
+  name             = "web-asg"
+  launch_configuration = aws_launch_configuration.web_lc.name
+  min_size         = 2
+  max_size         = 5
+  desired_capacity = 2
+  target_group_arns = [aws_lb_target_group.web_target_group.arn]
+  vpc_zone_identifier = ["subnet-xxxxxxxxxxx", "subnet-yyyyyyyyyyy"] # Specify your subnets
+}
+
+# Create a Launch Configuration for instances
+resource "aws_launch_configuration" "web_lc" {
+  name_prefix   = "web-lc-"
+  image_id      = "ami-xxxxxxxxxxxxx"  # Specify your desired AMI ID
+  instance_type = "t2.micro"            # Adjust the instance type as needed
+  key_name      = "your-key-pair-name"  # Specify your key pair name
+  security_groups = [aws_security_group.web_sg.name]
+
+  user_data = <<-EOF
+    #!/bin/bash
+    apt-get update
+    apt-get install -y apache2 php
+    echo "<?php phpinfo(); ?>" > /var/www/html/index.php
+    systemctl enable apache2
+    systemctl start apache2
+    EOF
+}
+
+# Create a target group for the load balancer
+resource "aws_lb_target_group" "web_target_group" {
+  name     = "web-target-group"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = "vpc-xxxxxxxxxxx" # Specify your VPC ID
+}
+
+# Define a listener rule to route traffic to instances
+resource "aws_lb_listener_rule" "web_listener_rule" {
+  listener_arn = aws_lb.web_lb.arn
+  action {
+    type             = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      status_code  = "200"
+      content      = "OK"
+    }
+  }
+}
