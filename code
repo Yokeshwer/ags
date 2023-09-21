@@ -1,0 +1,111 @@
+# main.tf
+
+# AWS provider configuration
+provider "aws" {
+  region = "us-east-1" # Change to your desired AWS region
+}
+
+# VPC and subnets
+resource "aws_vpc" "my_vpc" {
+  cidr_block = "10.0.0.0/16"
+}
+
+resource "aws_subnet" "subnet_a" {
+  vpc_id                  = aws_vpc.my_vpc.id
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "us-east-1a"
+  map_public_ip_on_launch = true
+}
+
+resource "aws_security_group" "my_sg" {
+  name_prefix = "my-sg-"
+
+  # Define your security group rules here
+  # Example: Allow HTTP traffic
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# IAM role for EC2 instances (add necessary policies)
+resource "aws_iam_role" "ec2_role" {
+  name = "ec2_role"
+}
+
+# Attach IAM policy (e.g., AmazonS3ReadOnlyAccess) to the role if needed
+
+# Launch configuration
+resource "aws_launch_configuration" "my_launch_config" {
+  name_prefix   = "my-launch-config-"
+  image_id      = "ami-xxxxxxxxxxxxx" # Replace with your desired AMI ID
+  instance_type = "t2.micro"
+  security_groups = [aws_security_group.my_sg.name]
+
+  # User data script to install and configure PHP
+  user_data = <<-EOF
+              #!/bin/bash
+              yum install -y httpd php
+              systemctl start httpd
+              systemctl enable httpd
+              # Copy your PHP application files here
+              EOF
+
+  # IAM role for instances
+  iam_instance_profile = aws_iam_instance_profile.ec2_role.name
+}
+
+# Auto Scaling Group
+resource "aws_autoscaling_group" "my_asg" {
+  name_prefix = "my-asg-"
+
+  launch_configuration = aws_launch_configuration.my_launch_config.name
+  min_size             = 2
+  max_size             = 4
+  desired_capacity     = 2
+
+  vpc_zone_identifier  = [aws_subnet.subnet_a.id] # Use your subnet IDs
+  target_group_arns   = [aws_lb_target_group.my_target_group.arn]
+
+  # Define your auto scaling policies and settings here
+}
+
+# Elastic Load Balancer
+resource "aws_lb" "my_lb" {
+  name               = "my-lb"
+  internal           = false
+  load_balancer_type = "application"
+  subnets            = [aws_subnet.subnet_a.id] # Use your subnet IDs
+
+  enable_deletion_protection = false # For demo purposes; consider enabling in production
+
+  enable_http2 = true # Enable HTTP/2 for better performance
+}
+
+# Elastic Load Balancer Target Group
+resource "aws_lb_target_group" "my_target_group" {
+  name        = "my-target-group"
+  port        = 80
+  protocol    = "HTTP"
+  target_type = "instance"
+
+  vpc_id = aws_vpc.my_vpc.id
+
+  health_check {
+    interval            = 30
+    path                = "/"
+    port                = "80"
+    protocol            = "HTTP"
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 5
+  }
+}
+
+# Attach instances to the target group
+resource "aws_lb_target_group_attachment" "my_target_group_attachment" {
+  target_group_arn = aws_lb_target_group.my_target_group.arn
+  target_id        = aws_instance.my_instance.*.id
+}
